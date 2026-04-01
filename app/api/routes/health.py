@@ -33,6 +33,11 @@ async def config(request: Request):
         "top_n_fused": settings.top_n_fused,
         "top_n_final": settings.top_n_final,
         "top_n_context": settings.top_n_context,
+        "enable_pdf_ingest": settings.enable_pdf_ingest,
+        "pdf_dir": str(settings.abs_pdf_dir),
+        "pdf_max_files": settings.pdf_max_files,
+        "pdf_chunk_size": settings.pdf_chunk_size,
+        "pdf_chunk_overlap": settings.pdf_chunk_overlap,
     }
 
 

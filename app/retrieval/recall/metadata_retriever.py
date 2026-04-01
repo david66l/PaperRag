@@ -38,11 +38,11 @@ class MetadataRetriever:
             # Year match
             if query_years:
                 for year in query_years:
-                    if year in cand.update_date:
+                    if cand.published and year in cand.published:
                         score += 0.3
 
             # Term match in title
-            title_lower = cand.title.lower()
+            title_lower = (cand.title or "").lower()
             for term in query_terms:
                 if term in title_lower:
                     score += 0.2

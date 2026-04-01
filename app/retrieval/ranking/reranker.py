@@ -22,6 +22,7 @@ class FallbackReranker(BaseRerankerProvider):
         for c in candidates:
             c.rerank_score = c.fused_score
             c.final_score = c.fused_score
+            c.score = c.final_score
         candidates.sort(key=lambda c: c.final_score, reverse=True)
         logger.info("Fallback reranker: kept fused ordering for %d candidates", len(candidates))
         return candidates
@@ -48,6 +49,7 @@ class LocalRerankerProvider(BaseRerankerProvider):
         for cand, score in zip(candidates, scores):
             cand.rerank_score = float(score)
             cand.final_score = float(score)
+            cand.score = cand.final_score
 
         candidates.sort(key=lambda c: c.final_score, reverse=True)
         logger.info("Local reranker: reranked %d candidates", len(candidates))

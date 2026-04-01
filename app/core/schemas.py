@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import date
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
@@ -54,12 +53,15 @@ class Chunk(BaseModel):
     chunk_id: str
     doc_id: str
     text: str
-    title: str
-    authors: list[str]
-    categories: list[str]
-    update_date: str
-    source_type: str = "arxiv_metadata"
-    chunk_type: str = "title_abstract"  # title_abstract | abstract_only | section | ...
+    source_type: Literal["metadata", "pdf"] = "metadata"
+    title: str | None = None
+    paper_id: str | None = None
+    categories: list[str] = Field(default_factory=list)
+    authors: list[str] = Field(default_factory=list)
+    published: str | None = None
+    file_name: str | None = None
+    file_path: str | None = None
+    page_no: int | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -78,10 +80,16 @@ class Candidate(BaseModel):
     chunk_id: str
     doc_id: str
     text: str
-    title: str
+    source_type: Literal["metadata", "pdf"] = "metadata"
+    score: float = 0.0
+    title: str | None = None
+    paper_id: str | None = None
     authors: list[str] = Field(default_factory=list)
     categories: list[str] = Field(default_factory=list)
-    update_date: str = ""
+    published: str | None = None
+    file_name: str | None = None
+    file_path: str | None = None
+    page_no: int | None = None
     source_scores: SourceScores = Field(default_factory=SourceScores)
     fused_score: float = 0.0
     rerank_score: float = 0.0
@@ -92,10 +100,15 @@ class Citation(BaseModel):
     """A citation reference in the final answer."""
     chunk_id: str
     doc_id: str
-    title: str
-    authors: list[str]
-    categories: list[str]
-    update_date: str = ""
+    source_type: Literal["metadata", "pdf"] = "metadata"
+    title: str | None = None
+    paper_id: str | None = None
+    authors: list[str] = Field(default_factory=list)
+    categories: list[str] = Field(default_factory=list)
+    published: str | None = None
+    file_name: str | None = None
+    file_path: str | None = None
+    page_no: int | None = None
     relevance_score: float = 0.0
 
 
@@ -122,6 +135,7 @@ class QueryResponse(BaseModel):
     answer: str
     citations: list[Citation]
     retrieved_chunks: list[Candidate]
+    evidence_level: Literal["metadata", "pdf", "hybrid"] = "metadata"
     retrieval_trace: dict[str, Any] = Field(default_factory=dict)
     elapsed_ms: float = 0.0
 

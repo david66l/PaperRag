@@ -37,6 +37,22 @@ class JsonLoader(BaseLoader):
                         raw["journal_ref"] = raw.pop("journal-ref")
                     if "report-no" in raw:
                         raw["report_no"] = raw.pop("report-no")
+                    # Normalize nullable string fields from arXiv dump.
+                    for key in (
+                        "submitter",
+                        "authors",
+                        "title",
+                        "comments",
+                        "journal_ref",
+                        "doi",
+                        "report_no",
+                        "categories",
+                        "license",
+                        "abstract",
+                        "update_date",
+                    ):
+                        if raw.get(key) is None:
+                            raw[key] = ""
                     record = RawPaperRecord.model_validate(raw)
                     yield record
                     count += 1

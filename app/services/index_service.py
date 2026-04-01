@@ -1,7 +1,6 @@
 """Index building service."""
 
 import time
-from pathlib import Path
 
 from app.core.config import Settings
 from app.core.logging import get_logger
@@ -23,7 +22,13 @@ class IndexService:
     def build(self, request: BuildIndexRequest) -> BuildIndexResponse:
         start = time.time()
 
-        # 1. Ingestion
+        # 1. Full rebuild reset (incremental update intentionally disabled)
+        self.persistence.doc_repo.clear()
+        self.persistence.chunk_repo.clear()
+        self.persistence.vector_repo.reset()
+        self.persistence.keyword_repo.reset()
+
+        # 2. Ingestion
         ingestion = IngestionPipeline(self.settings)
         data_path = request.data_path or None
         limit = request.limit or 0
@@ -36,29 +41,23 @@ class IndexService:
                 elapsed_ms=(time.time() - start) * 1000,
             )
 
-        # 2. Embedding
+        # 3. Embedding
         provider = create_embedding_provider(self.settings)
         emb_pipeline = EmbeddingPipeline(provider, batch_size=self.settings.embedding_batch_size)
         chunk_ids, vectors = emb_pipeline.embed_chunks(chunks)
 
-        # 3. Store documents + chunks
-        if request.rebuild:
-            self.persistence.doc_repo.clear()
-            self.persistence.chunk_repo.clear()
-            self.persistence.vector_repo.reset()
-            self.persistence.keyword_repo.reset()
-
+        # 4. Store documents + chunks (chunk_id -> chunk metadata mapping in chunk_repo)
         self.persistence.doc_repo.add_batch(documents)
         self.persistence.chunk_repo.add_batch(chunks)
 
-        # 4. Build vector index
+        # 5. Build vector index
         self.persistence.vector_repo.build(chunk_ids, vectors)
 
-        # 5. Build keyword index
+        # 6. Build keyword index
         texts = [c.text for c in chunks]
         self.persistence.keyword_repo.build(chunk_ids, texts)
 
-        # 6. Persist
+        # 7. Persist
         self.persistence.save_all()
 
         elapsed = (time.time() - start) * 1000
@@ -69,5 +68,5 @@ class IndexService:
             num_documents=len(documents),
             num_chunks=len(chunks),
             elapsed_ms=elapsed,
-            message=f"Successfully indexed {len(documents)} papers ({len(chunks)} chunks)",
+            message=f"Successfully indexed {len(documents)} documents ({len(chunks)} chunks)",
         )

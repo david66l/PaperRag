@@ -5,7 +5,7 @@ from typing import Literal
 
 from app.core.config import Settings
 from app.core.logging import get_logger
-from app.core.schemas import QueryResponse, RetrievalResult
+from app.core.schemas import Citation, QueryResponse, RetrievalResult
 from app.embedding.pipeline import create_embedding_provider
 from app.generation.pipeline import GenerationPipeline
 from app.retrieval.pipeline import RetrievalPipeline
@@ -44,6 +44,7 @@ class QueryService:
 
         # 2. Generation
         answer, citations = self._generation.run(retrieval_result, mode=mode)
+        evidence_level = self._infer_evidence_level(citations)
 
         elapsed = (time.time() - start) * 1000
         logger.info("Query answered in %.1f ms", elapsed)
@@ -52,6 +53,18 @@ class QueryService:
             answer=answer,
             citations=citations,
             retrieved_chunks=retrieval_result.candidates,
+            evidence_level=evidence_level,
             retrieval_trace=retrieval_result.trace,
             elapsed_ms=elapsed,
         )
+
+    @staticmethod
+    def _infer_evidence_level(citations: list[Citation]) -> str:
+        source_types = {c.source_type for c in citations}
+        if not source_types:
+            return "metadata"
+        if source_types == {"metadata"}:
+            return "metadata"
+        if source_types == {"pdf"}:
+            return "pdf"
+        return "hybrid"

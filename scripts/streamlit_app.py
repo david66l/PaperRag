@@ -66,10 +66,19 @@ if st.button("Search & Answer", type="primary") and query:
 
                 st.markdown("### Retrieved Papers")
                 for i, chunk in enumerate(result.get("retrieved_chunks", []), 1):
-                    with st.expander(f"[{i}] {chunk['title']} (score: {chunk['final_score']:.4f})"):
-                        st.write(f"**Authors:** {', '.join(chunk.get('authors', [])[:5])}")
-                        st.write(f"**Categories:** {', '.join(chunk.get('categories', []))}")
-                        st.write(f"**Date:** {chunk.get('update_date', '')}")
+                    title = chunk.get("title") or chunk.get("file_name") or chunk.get("doc_id", "N/A")
+                    score = chunk.get("score", chunk.get("final_score", 0.0))
+                    source_type = chunk.get("source_type", "metadata")
+                    with st.expander(f"[{i}] {title} ({source_type}, score: {score:.4f})"):
+                        if source_type == "pdf":
+                            st.write(f"**File:** {chunk.get('file_name', '')}")
+                            st.write(f"**Path:** {chunk.get('file_path', '')}")
+                            st.write(f"**Page:** {chunk.get('page_no', '')}")
+                        else:
+                            st.write(f"**Paper ID:** {chunk.get('paper_id', chunk.get('doc_id', ''))}")
+                            st.write(f"**Authors:** {', '.join(chunk.get('authors', [])[:5])}")
+                            st.write(f"**Categories:** {', '.join(chunk.get('categories', []))}")
+                            st.write(f"**Published:** {chunk.get('published', '')}")
                         st.write(f"**Text:** {chunk['text'][:500]}...")
 
                 with st.expander("Retrieval Trace"):

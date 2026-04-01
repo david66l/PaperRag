@@ -32,9 +32,20 @@ class Settings(BaseSettings):
             return self.index_dir
         return self.project_root / self.index_dir
 
+    @property
+    def abs_pdf_dir(self) -> Path:
+        if self.pdf_dir.is_absolute():
+            return self.pdf_dir
+        return self.project_root / self.pdf_dir
+
     # --- Ingestion ---
     load_limit: int = Field(default=0, description="Max papers to load, 0 = unlimited")
     default_data_file: str = Field(default="arxiv-metadata-oai-snapshot.json")
+    enable_pdf_ingest: bool = False
+    pdf_dir: Path = Field(default=Path("/Volumes/PS2000/我的AI项目"))
+    pdf_max_files: int = 100
+    pdf_chunk_size: int = 800
+    pdf_chunk_overlap: int = 120
 
     # --- Chunking ---
     chunk_strategy: Literal["metadata", "fixed", "recursive"] = "metadata"

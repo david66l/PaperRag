@@ -32,10 +32,15 @@ class BM25Retriever:
                     chunk_id=chunk.chunk_id,
                     doc_id=chunk.doc_id,
                     text=chunk.text,
+                    source_type=chunk.source_type,
                     title=chunk.title,
+                    paper_id=chunk.paper_id,
                     authors=chunk.authors,
                     categories=chunk.categories,
-                    update_date=chunk.update_date,
+                    published=chunk.published,
+                    file_name=chunk.file_name,
+                    file_path=chunk.file_path,
+                    page_no=chunk.page_no,
                     source_scores=SourceScores(bm25_score=score),
                 )
             )
