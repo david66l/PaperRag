@@ -1,6 +1,6 @@
-"""Test query generation for ablation evaluation."""
+"""Generate evaluation test cases from indexed metadata/PDF chunks."""
 
-# OPTIMIZED_BY_CODEX_STEP_2
+# OPTIMIZED_BY_CODEX_RAGAS_STEP_2
 from __future__ import annotations
 
 import random
@@ -12,7 +12,7 @@ from app.core.schemas import Chunk
 
 @dataclass
 class EvalCase:
-    """One evaluation case used by the ablation runner."""
+    """One query case for RAGAS evaluation."""
 
     query: str
     ground_truth: str
@@ -21,7 +21,7 @@ class EvalCase:
 
 
 class TestsetGenerator:
-    """Generate synthetic evaluation queries from indexed chunks."""
+    """Generate testset queries with metadata-first strategy."""
 
     def __init__(self, seed: int = 42):
         self._rng = random.Random(seed)
@@ -30,83 +30,86 @@ class TestsetGenerator:
         if not chunks:
             return []
 
-        metadata_chunks = [c for c in chunks if c.source_type == "metadata"]
-        pdf_chunks = [c for c in chunks if c.source_type == "pdf"]
+        metadata_chunks = [chunk for chunk in chunks if chunk.source_type == "metadata"]
+        pdf_chunks = [chunk for chunk in chunks if chunk.source_type == "pdf"]
 
-        cases: list[EvalCase] = []
-        half = max(1, num_queries // 2)
+        base_pool = metadata_chunks if metadata_chunks else chunks
+        cases = self._sample_cases(base_pool, max(1, int(num_queries * 0.7)), preferred_source="metadata")
 
-        cases.extend(self._sample_cases(metadata_chunks or chunks, half, preferred_source="metadata"))
-        cases.extend(self._sample_cases(pdf_chunks or chunks, num_queries - len(cases), preferred_source="pdf"))
+        if pdf_chunks:
+            pdf_target = num_queries - len(cases)
+            cases.extend(self._sample_cases(pdf_chunks, max(0, pdf_target), preferred_source="pdf"))
 
         while len(cases) < num_queries:
-            c = self._rng.choice(chunks)
-            cases.append(self._build_case(c, preferred_source=c.source_type))
+            chosen = self._rng.choice(chunks)
+            cases.append(self._build_case(chosen, preferred_source=chosen.source_type))
 
         self._rng.shuffle(cases)
         return cases[:num_queries]
 
-    def _sample_cases(self, source_chunks: list[Chunk], n: int, preferred_source: str) -> list[EvalCase]:
-        if not source_chunks:
+    def _sample_cases(self, pool: list[Chunk], count: int, preferred_source: str) -> list[EvalCase]:
+        if not pool or count <= 0:
             return []
 
-        if len(source_chunks) <= n:
-            picked = [self._rng.choice(source_chunks) for _ in range(n)]
+        if len(pool) >= count:
+            selected = self._rng.sample(pool, count)
         else:
-            picked = self._rng.sample(source_chunks, n)
+            selected = [self._rng.choice(pool) for _ in range(count)]
 
-        return [self._build_case(chunk, preferred_source=preferred_source) for chunk in picked]
+        return [self._build_case(chunk, preferred_source=preferred_source) for chunk in selected]
 
     def _build_case(self, chunk: Chunk, preferred_source: str) -> EvalCase:
         keywords = self._extract_keywords(chunk.text)
-        k1 = keywords[0] if keywords else "method"
-        k2 = keywords[1] if len(keywords) > 1 else "experiment"
+        key_phrase = ", ".join(keywords[:2]) if keywords else "core contribution"
 
         if preferred_source == "pdf":
             file_name = chunk.file_name or f"{chunk.doc_id}.pdf"
             page_no = chunk.page_no or 1
             query = (
-                f"In file '{file_name}' page {page_no}, what does the paper say about "
-                f"{k1} and {k2}?"
+                f"Based only on PDF file '{file_name}' page {page_no}, explain the method details related to {key_phrase}."
             )
         else:
             title = chunk.title or chunk.doc_id
-            query = f"Based on metadata, summarize the key idea of '{title}' with focus on {k1}."
+            categories = ", ".join(chunk.categories[:2]) if chunk.categories else "AI research"
+            query = (
+                f"For paper '{title}' in categories {categories}, summarize the main idea and evidence about {key_phrase}."
+            )
 
         return EvalCase(
             query=query,
-            ground_truth=chunk.text[:500],
+            ground_truth=chunk.text[:700],
             target_chunk_ids={chunk.chunk_id},
             expected_source=preferred_source,
         )
 
     @staticmethod
-    def _extract_keywords(text: str, top_k: int = 3) -> list[str]:
+    def _extract_keywords(text: str, top_k: int = 5) -> list[str]:
         tokens = re.findall(r"[A-Za-z][A-Za-z0-9\-]{3,}", text)
-        stop = {
+        stop_words = {
+            "paper",
+            "method",
+            "results",
+            "using",
+            "their",
             "this",
             "that",
             "with",
             "from",
-            "paper",
-            "using",
-            "their",
-            "which",
-            "these",
-            "results",
-            "method",
+            "model",
+            "models",
         }
+
         uniq: list[str] = []
-        seen = set()
+        seen: set[str] = set()
         for token in tokens:
-            t = token.lower()
-            if t in stop or t in seen:
+            lowered = token.lower()
+            if lowered in stop_words or lowered in seen:
                 continue
-            seen.add(t)
+            seen.add(lowered)
             uniq.append(token)
             if len(uniq) >= top_k:
                 break
         return uniq
 
 
-# STEP_2_SUMMARY: Added synthetic query/testset generator for metadata and PDF ablation scenarios.
+# STEP_2_SUMMARY: Testset generator now creates 50-query metadata/PDF mixed cases for RAGAS ablation.

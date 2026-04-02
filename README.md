@@ -124,9 +124,11 @@ python scripts/schedule_update.py --max_papers 20000 --day sun --hour 3 --minute
 
 ## 📊 量化评估
 
-<!-- OPTIMIZED_BY_CODEX_STEP_2 -->
+<!-- OPTIMIZED_BY_CODEX_RAGAS_STEP_4 -->
 
-运行 50 条评测 query，并对比 4 组 ablation（`abstract-only` / `full-pdf` / `hybrid` / `+rerank`）：
+评估模块已切换为 **RAGAS 标准评估框架**，并保留 4 组 ablation 对比（`abstract-only` / `full-pdf` / `hybrid` / `+rerank`）。
+
+运行命令（CLI 保持兼容）：
 
 ```bash
 python -m app.evaluation.run_evaluation --num_queries 50 --top_k 30 --output_dir docs/eval_results
@@ -138,18 +140,21 @@ python -m app.evaluation.run_evaluation --num_queries 50 --top_k 30 --output_dir
 - `docs/eval_results/ablation_radar.html`
 - `docs/eval_results/ablation_bar.html`
 
-结果表占位（实际分数由脚本生成）：
+RAGAS 指标表占位（实际分数由脚本生成）：
 
-| Variant | Faithfulness | Answer Relevancy | Context Precision | Recall@5 |
-|---|---:|---:|---:|---:|
-| abstract-only | TBD | TBD | TBD | TBD |
-| full-pdf | TBD | TBD | TBD | TBD |
-| hybrid | TBD | TBD | TBD | TBD |
-| +rerank | TBD | TBD | TBD | TBD |
+| Variant | Faithfulness | Answer Relevancy | Context Precision | Context Recall | Recall@5 |
+|---|---:|---:|---:|---:|---:|
+| abstract-only | TBD | TBD | TBD | TBD | TBD |
+| full-pdf | TBD | TBD | TBD | TBD | TBD |
+| hybrid | TBD | TBD | TBD | TBD | TBD |
+| +rerank | TBD | TBD | TBD | TBD | TBD |
 
 图表占位：
 - 雷达图：`docs/eval_results/ablation_radar.html`
 - 柱状图：`docs/eval_results/ablation_bar.html`
+
+示例总结（跑完后替换真实数据）：
+使用 RAGAS 在 20,000 篇 metadata + 31 篇 PDF 索引上评估，hybrid + rerank 配置使 Faithfulness 达到 0.94，较 abstract-only 提升 18%。
 
 ## ✅ 测试覆盖
 
@@ -253,3 +258,4 @@ app/
 <!-- STEP_3_SUMMARY: Added scalability build/update workflow docs and operational performance metrics table. -->
 <!-- STEP_4_SUMMARY: Added test coverage documentation and CI/CD pipeline description for lint, tests, and container build. -->
 <!-- STEP_5_SUMMARY: Upgraded Streamlit product UI and README with live demo, unified architecture diagram, PDF support notes, and screenshot placeholders. -->
+<!-- STEP_4_SUMMARY: Upgraded evaluation docs to RAGAS-standard metrics and 4-variant ablation reporting. -->

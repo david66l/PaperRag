@@ -37,3 +37,5 @@ ragas[all]>=0.1.10
 # STEP_2_SUMMARY: Added evaluation dependencies for RAGAS pipeline, dataset handling, and chart rendering.
 # STEP_3_SUMMARY: Added APScheduler dependency for weekly automated index refresh jobs.
 # STEP_4_SUMMARY: Added pytest dependencies for local and CI test execution.
+# OPTIMIZED_BY_CODEX_RAGAS_STEP_1
+# STEP_1_SUMMARY: RAGAS core dependencies (datasets, ragas[all]) are already present and kept sorted.
