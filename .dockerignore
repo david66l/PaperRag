@@ -1,0 +1,20 @@
+# OPTIMIZED_BY_CODEX_STEP_1
+.git
+.gitignore
+.venv
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.log
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.DS_Store
+indexes/
+data/
+.env
+.env.*
+.vscode/
+.idea/
+# STEP_1_SUMMARY: Docker build context now excludes local caches, secrets, and heavy runtime data.

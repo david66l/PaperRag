@@ -1,0 +1,52 @@
+# OPTIMIZED_BY_CODEX_STEP_1
+services:
+  api:
+    build:
+      context: .
+      target: runtime
+    container_name: paperrag-api
+    env_file:
+      - .env
+    environment:
+      PAPERRAG_IN_DOCKER: "true"
+      PAPERRAG_API_HOST: "0.0.0.0"
+      PAPERRAG_API_PORT: "8000"
+      PAPERRAG_API_RELOAD: "false"
+    command: ["python", "scripts/run_api.py"]
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./indexes:/app/indexes
+    depends_on:
+      - redis
+
+  streamlit:
+    build:
+      context: .
+      target: runtime
+    container_name: paperrag-streamlit
+    env_file:
+      - .env
+    environment:
+      PAPERRAG_IN_DOCKER: "true"
+      PAPERRAG_API_BASE_URL: "http://api:8000"
+    command:
+      - streamlit
+      - run
+      - scripts/streamlit_app.py
+      - --server.address=0.0.0.0
+      - --server.port=8501
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./indexes:/app/indexes
+    depends_on:
+      - api
+
+  redis:
+    image: redis:7-alpine
+    container_name: paperrag-redis
+    ports:
+      - "6379:6379"
+
+# STEP_1_SUMMARY: docker-compose now orchestrates api, streamlit, and redis with index volume mount.
