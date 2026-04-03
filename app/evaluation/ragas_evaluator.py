@@ -1,8 +1,11 @@
 """RAGAS evaluator that reuses the existing retrieval and generation pipelines."""
 
 # OPTIMIZED_BY_CODEX_RAGAS_STEP_2
+# FIXED_RAGAS_WITH_DASHSCOPE_STEP_1
 from __future__ import annotations
 
+import os
+import time
 from dataclasses import dataclass
 from statistics import mean
 from typing import Any
@@ -42,7 +45,16 @@ class RagasAblationEvaluator:
         self.settings = settings
         self.persistence = persistence
         self.top_k = top_k
-        self._ragas_llm = self._build_ragas_llm()
+        self._judge = self._resolve_judge_config()
+        self._ragas_llm, self._ragas_embeddings = self._build_ragas_runtime()
+
+    @property
+    def judge_info(self) -> dict[str, str]:
+        return {
+            "base_url": self._judge["base_url"],
+            "model": self._judge["model"],
+            "embedding_model": self._judge["embedding_model"],
+        }
 
     def evaluate_variant(self, variant: AblationVariant, cases: list[EvalCase]) -> dict[str, float]:
         local_settings = self.settings.model_copy(deep=True)
@@ -61,16 +73,16 @@ class RagasAblationEvaluator:
 
         rows: list[dict[str, Any]] = []
         for case in cases:
-            try:
-                retrieval_result = retrieval_pipeline.run(case.query, top_k=self.top_k)
-            except Exception as exc:
-                if not variant.rerank_enabled:
-                    raise
-                logger.warning("Rerank variant fallback to no-rerank due to error: %s", exc)
-                local_settings.rerank_enabled = False
-                local_settings.reranker_provider = "none"
-                retrieval_pipeline = RetrievalPipeline(local_settings, self.persistence, provider)
-                retrieval_result = retrieval_pipeline.run(case.query, top_k=self.top_k)
+            retrieval_result = self._run_with_retries(
+                lambda: self._retrieve_with_rerank_fallback(
+                    retrieval_pipeline=retrieval_pipeline,
+                    query=case.query,
+                    variant=variant,
+                    local_settings=local_settings,
+                    provider=provider,
+                ),
+                operation=f"retrieve:{case.query[:48]}",
+            )
 
             filtered_candidates = [
                 candidate for candidate in retrieval_result.candidates if candidate.source_type in variant.allowed_sources
@@ -87,7 +99,10 @@ class RagasAblationEvaluator:
                 citations=citations,
                 trace=retrieval_result.trace,
             )
-            answer, _ = generation_pipeline.run(scoped_result, mode="concise")
+            answer, _ = self._run_with_retries(
+                lambda: generation_pipeline.run(scoped_result, mode="concise"),
+                operation=f"generate:{case.query[:48]}",
+            )
 
             retrieved_ids = [candidate.chunk_id for candidate in filtered_candidates]
             row = {
@@ -100,6 +115,49 @@ class RagasAblationEvaluator:
             rows.append(row)
 
         return self._evaluate_rows_with_ragas(rows)
+
+    # FIXED_RAGAS_WITH_DASHSCOPE_STEP_3
+    def _run_with_retries(self, fn, operation: str, retries: int = 3, sleep_seconds: float = 2.0):
+        last_exc: Exception | None = None
+        for attempt in range(1, retries + 1):
+            try:
+                return fn()
+            except Exception as exc:
+                last_exc = exc
+                if attempt >= retries:
+                    break
+                message = str(exc).lower()
+                transient = any(token in message for token in ["ssl", "timeout", "connect", "eof"])
+                if not transient:
+                    raise
+                logger.warning(
+                    "Transient error on %s (attempt %s/%s): %s",
+                    operation,
+                    attempt,
+                    retries,
+                    exc,
+                )
+                time.sleep(sleep_seconds)
+        raise RuntimeError(f"{operation} failed after {retries} attempts: {last_exc}") from last_exc
+
+    def _retrieve_with_rerank_fallback(
+        self,
+        retrieval_pipeline: RetrievalPipeline,
+        query: str,
+        variant: AblationVariant,
+        local_settings: Settings,
+        provider,
+    ) -> RetrievalResult:
+        try:
+            return retrieval_pipeline.run(query, top_k=self.top_k)
+        except Exception as exc:
+            if not variant.rerank_enabled:
+                raise
+            logger.warning("Rerank variant fallback to no-rerank due to error: %s", exc)
+            local_settings.rerank_enabled = False
+            local_settings.reranker_provider = "none"
+            fallback_pipeline = RetrievalPipeline(local_settings, self.persistence, provider)
+            return fallback_pipeline.run(query, top_k=self.top_k)
 
     def _evaluate_rows_with_ragas(self, rows: list[dict[str, Any]]) -> dict[str, float]:
         if not rows:
@@ -116,91 +174,144 @@ class RagasAblationEvaluator:
         return ragas_scores
 
     def _run_ragas(self, rows: list[dict[str, Any]]) -> dict[str, float]:
-        try:
-            from datasets import Dataset
-            from ragas import evaluate
-            from ragas.metrics import answer_relevancy, context_precision, context_recall, faithfulness
+        from datasets import Dataset
+        from ragas import evaluate
+        from ragas.metrics import answer_relevancy, context_precision, context_recall, faithfulness
 
-            dataset = Dataset.from_dict(
-                {
-                    "question": [row["question"] for row in rows],
-                    "answer": [row["answer"] for row in rows],
-                    "contexts": [row["contexts"] for row in rows],
-                    "ground_truth": [row["ground_truth"] for row in rows],
-                }
-            )
+        dataset = Dataset.from_dict(
+            {
+                "question": [row["question"] for row in rows],
+                "answer": [row["answer"] for row in rows],
+                "contexts": [row["contexts"] for row in rows],
+                "ground_truth": [row["ground_truth"] for row in rows],
+            }
+        )
 
-            metrics = [faithfulness, answer_relevancy, context_precision, context_recall]
-
-            kwargs: dict[str, Any] = {"metrics": metrics}
-            if self._ragas_llm is not None:
-                kwargs["llm"] = self._ragas_llm
-
-            try:
-                result = evaluate(dataset=dataset, **kwargs)
-            except TypeError:
-                result = evaluate(dataset, **kwargs)
-
-            if hasattr(result, "to_pandas"):
-                df = result.to_pandas()
-                return {
-                    "faithfulness": float(df["faithfulness"].fillna(0.0).mean()) if "faithfulness" in df else 0.0,
-                    "answer_relevancy": float(df["answer_relevancy"].fillna(0.0).mean()) if "answer_relevancy" in df else 0.0,
-                    "context_precision": float(df["context_precision"].fillna(0.0).mean()) if "context_precision" in df else 0.0,
-                    "context_recall": float(df["context_recall"].fillna(0.0).mean()) if "context_recall" in df else 0.0,
-                }
-
-            if isinstance(result, dict):
-                return {
-                    "faithfulness": float(result.get("faithfulness", 0.0)),
-                    "answer_relevancy": float(result.get("answer_relevancy", 0.0)),
-                    "context_precision": float(result.get("context_precision", 0.0)),
-                    "context_recall": float(result.get("context_recall", 0.0)),
-                }
-
-            raise RuntimeError("Unsupported RAGAS result type")
-        except Exception as exc:
-            logger.warning("RAGAS evaluation failed, using deterministic fallback metrics: %s", exc)
-            return self._fallback_metrics(rows)
-
-    def _build_ragas_llm(self):
-        try:
-            from langchain_openai import ChatOpenAI
-            from ragas.llms import LangchainLLMWrapper
-
-            if not self.settings.llm_api_key:
-                return None
-
-            chat = ChatOpenAI(
-                model=self.settings.llm_model,
-                api_key=self.settings.llm_api_key,
-                base_url=self.settings.llm_api_url,
-                temperature=self.settings.llm_temperature,
-            )
-            return LangchainLLMWrapper(chat)
-        except Exception as exc:
-            logger.warning("RAGAS judge LLM wrapper unavailable: %s", exc)
-            return None
-
-    @staticmethod
-    def _fallback_metrics(rows: list[dict[str, Any]]) -> dict[str, float]:
-        def overlap_ratio(left: str, right: str) -> float:
-            lt = set(left.lower().split())
-            rt = set(right.lower().split())
-            if not lt or not rt:
-                return 0.0
-            return len(lt & rt) / max(1, len(lt | rt))
-
-        faithfulness = mean(overlap_ratio(row["answer"], " ".join(row["contexts"])) for row in rows)
-        answer_relevancy = mean(overlap_ratio(row["question"], row["answer"]) for row in rows)
-        context_precision = mean(overlap_ratio(" ".join(row["contexts"]), row["ground_truth"]) for row in rows)
-        context_recall = mean(overlap_ratio(row["ground_truth"], " ".join(row["contexts"])) for row in rows)
-        return {
-            "faithfulness": float(faithfulness),
-            "answer_relevancy": float(answer_relevancy),
-            "context_precision": float(context_precision),
-            "context_recall": float(context_recall),
+        metrics = [faithfulness, answer_relevancy, context_precision, context_recall]
+        kwargs: dict[str, Any] = {
+            "metrics": metrics,
+            "llm": self._ragas_llm,
+            "embeddings": self._ragas_embeddings,
         }
+
+        try:
+            result = evaluate(dataset=dataset, **kwargs)
+        except TypeError:
+            result = evaluate(dataset, **kwargs)
+
+        if hasattr(result, "to_pandas"):
+            df = result.to_pandas()
+            return {
+                "faithfulness": float(df["faithfulness"].fillna(0.0).mean()) if "faithfulness" in df else 0.0,
+                "answer_relevancy": float(df["answer_relevancy"].fillna(0.0).mean()) if "answer_relevancy" in df else 0.0,
+                "context_precision": float(df["context_precision"].fillna(0.0).mean()) if "context_precision" in df else 0.0,
+                "context_recall": float(df["context_recall"].fillna(0.0).mean()) if "context_recall" in df else 0.0,
+            }
+
+        if isinstance(result, dict):
+            return {
+                "faithfulness": float(result.get("faithfulness", 0.0)),
+                "answer_relevancy": float(result.get("answer_relevancy", 0.0)),
+                "context_precision": float(result.get("context_precision", 0.0)),
+                "context_recall": float(result.get("context_recall", 0.0)),
+            }
+
+        raise RuntimeError("Unsupported RAGAS result type")
+
+    def _resolve_judge_config(self) -> dict[str, str]:
+        api_key = (
+            os.getenv("PAPERRAG_OPENAI_API_KEY")
+            or os.getenv("PAPERRAG_LLM_API_KEY")
+            or self.settings.llm_api_key
+        )
+        base_url = (
+            os.getenv("PAPERRAG_LLM_BASE_URL")
+            or os.getenv("PAPERRAG_OPENAI_BASE_URL")
+            or self.settings.llm_api_url
+            or "https://dashscope.aliyuncs.com/compatible-mode/v1"
+        )
+        model = os.getenv("PAPERRAG_LLM_MODEL") or self.settings.llm_model or "qwen3-8b"
+        embedding_model = os.getenv("PAPERRAG_RAGAS_EMBEDDING_MODEL") or "text-embedding-v3"
+
+        if not api_key:
+            raise RuntimeError(
+                "RAGAS judge requires API key. Set PAPERRAG_OPENAI_API_KEY or PAPERRAG_LLM_API_KEY."
+            )
+
+        return {
+            "api_key": api_key,
+            "base_url": base_url,
+            "model": model,
+            "embedding_model": embedding_model,
+        }
+
+    def _build_ragas_runtime(self):
+        try:
+            from openai import OpenAI
+            from langchain_openai import OpenAIEmbeddings
+            from ragas.embeddings import LangchainEmbeddingsWrapper
+            from ragas.llms import llm_factory
+
+            client = OpenAI(
+                api_key=self._judge["api_key"],
+                base_url=self._judge["base_url"],
+            )
+            client = self._patch_dashscope_client(client)
+            llm = llm_factory(
+                model=self._judge["model"],
+                provider="openai",
+                client=client,
+            )
+            embeddings = LangchainEmbeddingsWrapper(
+                OpenAIEmbeddings(
+                    model=self._judge["embedding_model"],
+                    api_key=self._judge["api_key"],
+                    base_url=self._judge["base_url"],
+                )
+            )
+            return llm, embeddings
+        except Exception as exc:
+            raise RuntimeError(f"Failed to initialize RAGAS judge runtime: {exc}") from exc
+
+    def _patch_dashscope_client(self, client):
+        # FIXED_RAGAS_WITH_DASHSCOPE_STEP_4
+        original_create = client.chat.completions.create
+
+        def safe_create(*args, **kwargs):
+            messages = kwargs.get("messages")
+            if isinstance(messages, list):
+                normalized = []
+                for message in messages:
+                    if not isinstance(message, dict):
+                        normalized.append(message)
+                        continue
+                    content = message.get("content")
+                    if isinstance(content, list):
+                        parts: list[str] = []
+                        for item in content:
+                            if isinstance(item, str):
+                                parts.append(item)
+                            elif isinstance(item, dict):
+                                text = (
+                                    item.get("text")
+                                    or item.get("input_text")
+                                    or item.get("content")
+                                    or ""
+                                )
+                                if text:
+                                    parts.append(str(text))
+                            else:
+                                parts.append(str(item))
+                        msg_copy = dict(message)
+                        msg_copy["content"] = "\n".join(parts)
+                        normalized.append(msg_copy)
+                    else:
+                        normalized.append(message)
+                kwargs["messages"] = normalized
+            return original_create(*args, **kwargs)
+
+        client.chat.completions.create = safe_create
+        return client
 
 
 # STEP_2_SUMMARY: Added RAGAS evaluator that runs 4 ablation variants using existing retrieval + generation pipelines.
