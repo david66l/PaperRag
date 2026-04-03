@@ -17,6 +17,7 @@ services:
       - "8000:8000"
     volumes:
       - ./indexes:/app/indexes
+      - ./data:/app/data:ro
     depends_on:
       - redis
 
@@ -40,6 +41,7 @@ services:
       - "8501:8501"
     volumes:
       - ./indexes:/app/indexes
+      - ./data:/app/data:ro
     depends_on:
       - api
 

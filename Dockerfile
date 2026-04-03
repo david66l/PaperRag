@@ -7,8 +7,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends build-essential poppler-utils \
+RUN apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 update \
+    && apt-get install -y --fix-missing --no-install-recommends build-essential poppler-utils \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt ./requirements.txt
@@ -24,8 +24,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends poppler-utils \
+RUN apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 update \
+    && apt-get install -y --fix-missing --no-install-recommends poppler-utils \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /wheels /wheels
