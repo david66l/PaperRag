@@ -4,6 +4,8 @@ services:
     build:
       context: .
       target: runtime
+      args:
+        PYTHON_BASE_IMAGE: "docker.m.daocloud.io/library/python:3.11-slim"
     container_name: paperrag-api
     env_file:
       - .env
@@ -12,12 +14,15 @@ services:
       PAPERRAG_API_HOST: "0.0.0.0"
       PAPERRAG_API_PORT: "8000"
       PAPERRAG_API_RELOAD: "false"
+      PAPERRAG_LLM_MODEL: "qwen-turbo"
+      HF_ENDPOINT: "https://hf-mirror.com"
     command: ["python", "scripts/run_api.py"]
     ports:
       - "8000:8000"
     volumes:
       - ./indexes:/app/indexes
       - ./data:/app/data:ro
+      - ./pdfs:/app/pdfs:ro
     depends_on:
       - redis
 
@@ -25,12 +30,15 @@ services:
     build:
       context: .
       target: runtime
+      args:
+        PYTHON_BASE_IMAGE: "docker.m.daocloud.io/library/python:3.11-slim"
     container_name: paperrag-streamlit
     env_file:
       - .env
     environment:
       PAPERRAG_IN_DOCKER: "true"
       PAPERRAG_API_BASE_URL: "http://api:8000"
+      HF_ENDPOINT: "https://hf-mirror.com"
     command:
       - streamlit
       - run
@@ -42,6 +50,7 @@ services:
     volumes:
       - ./indexes:/app/indexes
       - ./data:/app/data:ro
+      - ./pdfs:/app/pdfs:ro
     depends_on:
       - api
 

@@ -2,6 +2,7 @@
 
 # OPTIMIZED_BY_CODEX_RAGAS_STEP_2
 # FIXED_RAGAS_WITH_DASHSCOPE_STEP_2
+# SWITCHED_TO_QWEN_TURBO_STEP_9
 from __future__ import annotations
 
 import argparse
@@ -25,7 +26,7 @@ logger = get_logger(__name__)
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run RAGAS evaluation with ablation")
-    parser.add_argument("--num_queries", type=int, default=50, help="Number of evaluation queries")
+    parser.add_argument("--num_queries", type=int, default=25, help="Number of evaluation queries")
     parser.add_argument("--top_k", type=int, default=30, help="Retrieval top_k for ablation")
     parser.add_argument(
         "--output_dir",
@@ -36,6 +37,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max_papers", type=int, default=0, help="Build index if empty using this metadata limit")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for testset generation")
     parser.add_argument("--data_path", type=str, default="", help="Optional metadata path for cold-start indexing")
+    parser.add_argument(
+        "--judge_model",
+        type=str,
+        default="",
+        help="Optional RAGAS judge model override (falls back to PAPERRAG_RAGAS_JUDGE_MODEL/PAPERRAG_LLM_MODEL)",
+    )
     return parser.parse_args()
 
 
@@ -44,7 +51,9 @@ def run() -> None:
     setup_logging()
 
     settings = get_settings()
-    _apply_llm_env_overrides(settings)
+    _apply_llm_env_overrides(settings, judge_model_override=args.judge_model)
+    logger.info("Using HF mirror: %s", os.getenv("HF_ENDPOINT", "https://hf-mirror.com"))
+    logger.info("Using judge LLM: %s", settings.llm_model)
     persistence = PersistenceManager(settings)
     _ensure_index_ready(settings, persistence, max_papers=args.max_papers, data_path=args.data_path)
 
@@ -67,9 +76,18 @@ def run() -> None:
     )
 
     results: dict[str, dict[str, float]] = {}
+    token_usage_total = 0  # SWITCHED_TO_QWEN_TURBO_STEP_10
     for variant in variants:
         try:
             results[variant.name] = evaluator.evaluate_variant(variant, cases)
+            usage = evaluator.last_token_usage
+            token_usage_total += int(usage.get("input_tokens_approx", 0))
+            logger.info(
+                "Approx token usage -> variant=%s rows=%s input_tokens_approx=%s",
+                variant.name,
+                usage.get("rows", 0),
+                usage.get("input_tokens_approx", 0),
+            )
         except Exception as exc:
             raise RuntimeError(f"RAGAS evaluation failed for variant={variant.name}: {exc}") from exc
 
@@ -83,6 +101,7 @@ def run() -> None:
 
     print("Evaluation completed")
     print(f"Queries: {len(cases)}")
+    print(f"Approx input tokens (all variants): {token_usage_total}")  # SWITCHED_TO_QWEN_TURBO_STEP_11
     print(json.dumps(results, ensure_ascii=False, indent=2))
 
 
@@ -113,10 +132,15 @@ def _ensure_index_ready(settings, persistence: PersistenceManager, max_papers: i
 
 
 # FIXED_RAGAS_WITH_DASHSCOPE_STEP_2
-def _apply_llm_env_overrides(settings) -> None:
+def _apply_llm_env_overrides(settings, judge_model_override: str = "") -> None:
     api_key = os.getenv("PAPERRAG_OPENAI_API_KEY") or os.getenv("PAPERRAG_LLM_API_KEY")
-    base_url = os.getenv("PAPERRAG_LLM_BASE_URL")
-    model = os.getenv("PAPERRAG_LLM_MODEL")
+    base_url = os.getenv("PAPERRAG_LLM_BASE_URL") or "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    model = (
+        judge_model_override.strip()
+        or os.getenv("PAPERRAG_RAGAS_JUDGE_MODEL")
+        or os.getenv("PAPERRAG_LLM_MODEL")
+        or "qwen-max"
+    )
 
     if api_key:
         settings.llm_api_key = api_key
@@ -124,6 +148,12 @@ def _apply_llm_env_overrides(settings) -> None:
         settings.llm_api_url = base_url
     if model:
         settings.llm_model = model
+    logger.info(  # SWITCHED_TO_QWEN_TURBO_STEP_12
+        "Evaluation LLM config from env -> model=%s base_url=%s key_present=%s",
+        settings.llm_model,
+        settings.llm_api_url,
+        bool(settings.llm_api_key),
+    )
 
 
 def _save_json(results: dict[str, dict[str, float]], output_path: Path) -> None:
